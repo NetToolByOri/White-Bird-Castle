@@ -1,0 +1,29 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#142536"><title>310 主控台｜精修1108.6</title><style>
+*{box-sizing:border-box}body{margin:0;background:#0c1521;color:#e9f2fc;font:15px/1.65 system-ui,"Microsoft JhengHei",sans-serif}main{max-width:980px;margin:32px auto;padding:0 20px 60px}header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}h1{margin:0;flex:1;font-size:30px}p{color:#adc2d5}section{padding:22px;background:#172738;border:1px solid #3e566e;border-radius:14px;margin:20px 0}h2{margin:0 0 12px;font-size:20px}.tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.tools a{display:flex;flex-direction:column;padding:24px 18px;background:#1c344b;border:1px solid #55728d;border-radius:12px;text-decoration:none;color:#edf6ff}.tools a:hover{border-color:#99d1fb;background:#24445f}.tools b{font-size:19px}.tools small{color:#b0c7dc}button{padding:10px 16px;margin:5px 8px 0 0;border:1px solid #6789a6;border-radius:7px;background:#2a5071;color:#fff;font:inherit;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.paused{border-color:#7b6546}.paused h2{color:#f8d28f}.note{font-size:13px;color:#a8bed3}#offlineStatus{white-space:pre-wrap}#userButton{margin:0;white-space:nowrap}@media(max-width:620px){main{margin:22px auto;padding:0 12px 50px}.tools{grid-template-columns:1fr}.tools a{padding:18px}section{padding:16px}h1{font-size:24px}header{gap:10px}}
+</style><script src="./whitebird-users.js"></script><script src="./whitebird-core.js"></script></head><body><main><header><h1>🥦 作業工具主控台</h1><button id="userButton" data-shion-identity>選擇用戶</button></header><p>長尾山雀工具包 · 精修1108.6（20261108-R6）</p><nav class="tools"><a data-wb-cap="personnel" href="./312-人事系統.html"><b>👥 312 人事系統</b><small>人員清冊與個人資料</small></a><a href="./313-休假預排表.html"><b>🗓️ 313 休假預排表</b><small>精修1108.6 · 效能模式、手機編輯、新版對抗區</small></a><a data-wb-cap="duty" href="./314-值星工具.html"><b>📋 314 值星工具</b><small>勤務排班；新版假表連動暫停</small></a><a data-wb-cap="qr" href="./315-Pale-Echo.html"><b>Pale Echo</b></a><a data-wb-cap="textTransfer" href="./316-Quiet-Tide.html"><b>316 Quiet Tide</b><small>文字快傳</small></a></nav><section data-wb-cap="consoleExport"><h2>資料匯出</h2><button id="consoleExport">全系統匯出</button><p id="consoleExportStatus" role="status"></p></section></main><script>
+(function(){const b=document.getElementById('userButton');function sync(){const u=ShionUsers.current();b.textContent=u?u.emoji+' '+u.name:'選擇用戶';}b.onclick=()=>ShionUsers.show();window.addEventListener('shion-user-changed',sync);sync();})();
+</script><script>// Read-only export: no writer lease and no duty/identity databases in the backup.
+(function(g){'use strict';
+const $=id=>document.getElementById(id);let busy=false;
+function readDB(name,requests){return new Promise((resolve,reject)=>{
+ const req=indexedDB.open(name);let absent=false;
+ req.onupgradeneeded=()=>{absent=true;req.transaction.abort();};
+ req.onerror=()=>absent?resolve({}):reject(req.error||Error('無法讀取資料'));
+ req.onblocked=()=>reject(Error('資料庫使用中，請稍後再試'));
+ req.onsuccess=()=>{const db=req.result,names=[...new Set(requests.map(x=>x[0]))].filter(n=>db.objectStoreNames.contains(n)),out={};if(!names.length){db.close();resolve(out);return;}
+ const tx=db.transaction(names,'readonly');for(const[store,key,label]of requests){if(!names.includes(store))continue;const r=key===null?tx.objectStore(store).getAll():tx.objectStore(store).get(key);r.onsuccess=()=>{if(r.result!==undefined)out[label]=r.result;};}
+ tx.oncomplete=()=>{db.close();resolve(out);};tx.onerror=tx.onabort=()=>{db.close();reject(tx.error||Error('無法讀取資料'));};};
+ });}
+async function capture(){await WBAccess.ready;WBAccess.assert('consoleExport');
+ const [personnel,ops,daily,stops]=await Promise.all([
+ readDB('OracleShion:Management',['people','personnelConfig','personnelOrders'].map(n=>[n,null,n])),
+ readDB('OracleShion:Planner7:Operations',[['leaveConfig',null,'leaveConfig']]),
+ readDB('OracleShion:Planner7:DailyTask',[['workspace','main','daily']]),
+ readDB('OracleShion:Planner7:Suspensions',[['workspace','main','suspensions']])]);
+ WBAccess.assert('consoleExport');const parts=WBPartitions.split(WBPartitions.readStores(ops));parts[5]=Object.fromEntries(['people','personnelConfig','personnelOrders'].map(n=>[n,personnel[n]||[]]));
+ parts[1].workspaces={...parts[1].workspaces,...daily,...stops};return WBPartitions.make(parts,[1,2,3,4,5,6,7,8]);
+}
+async function run(){if(busy)return;busy=true;const b=$('consoleExport'),status=$('consoleExportStatus');b.disabled=true;try{status.textContent='正在匯出…';const value=await capture();WBAccess.assert('consoleExport');const url=URL.createObjectURL(new Blob([JSON.stringify(value)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='全系統備份-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);status.textContent='已匯出。';}catch(e){status.textContent=e.message;}finally{busy=false;b.disabled=false;}}
+g.WhiteBirdConsole={capture,export:run};$('consoleExport').onclick=run;
+})(window);
+</script></body></html>
